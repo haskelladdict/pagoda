@@ -10,28 +10,37 @@ import (
   "os"
   "fmt"
   "unicode/utf8"
-  "log"
+//  "log"
 //  "io/ioutil"
 )
 
 
-// packet_options holds the parsed values of a command line
-// spec at runtime
-var parse_info parse_spec
+// parse_info holds the parsed values of a command line spec
+var parse_info parseSpec
+
+
+// option_info holds the filled in values of present on the actual
+// command line value corresponding to a command line spec at runtime
+var option_info optionSpec
+
+
+// option_spec is the type describing a filled in view of all
+// parsed commandline options which matched the parse_spec
+type optionSpec struct {
+  argOptions []option      // options present and parsed from command line
+}
 
 
 // parse_spec is the parent type describing all options and usage
-type parse_spec struct {
+type parseSpec struct {
   Usage string
-  Options []json_option    // options parsed from spec file
-  ArgOptions []option      // options present and parsed from command line
+  Options []jsonOption    // options according to the spec
 }
-
 
 
 // json_option describes a single option specification as parsed from the
 // JSON description
-type json_option struct {
+type jsonOption struct {
   Short_option string
   Long_option string
   Description string
@@ -39,10 +48,9 @@ type json_option struct {
 }
 
 
-
 // option describes an option based on json_option with value 
 type option struct {
-  json_option
+  jsonOption
   value interface{}
 }
 
@@ -68,6 +76,9 @@ func Parse_specs(content []byte) error {
     return err
   }
 
+  // initialize the option_spec
+  option_info.argOptions = make([]option, 0)
+
   err = match_spec_to_args(parse_info, os.Args)
   if err != nil {
     return err
@@ -82,12 +93,12 @@ func Parse_specs(content []byte) error {
 // either with a dash ('-') or a double dash ('--')). In that
 // case it returns the name of the option and the value if the
 // option was given via --opt=val.
-func decode_option(item string) (string, string, error) {
+func decode_option(item string) (string, string, bool) {
 
   // check for dash
   c, s := utf8.DecodeRuneInString(item)
   if s == 0 || string(c) != "-" {
-    return "", "", fmt.Errorf("%s is not an option\n", item)
+    return "", "", false
   }
   i := s
 
@@ -97,14 +108,14 @@ func decode_option(item string) (string, string, error) {
     i += s;
   }
 
-  // scan until end or until we hit a "="
+  // scan until end of string or until we hit a "="
   opt := ""
   for i < len(item) {
     c, s = utf8.DecodeRuneInString(item[i:])
     i += s
 
     if s == 0 {
-      return "", "", fmt.Errorf("failed to decode %s\n", item)
+      return "", "", false
     } else if string(c) == "=" {
       break
     }
@@ -112,42 +123,59 @@ func decode_option(item string) (string, string, error) {
     opt += string(c)
   }
 
+  // scan for optional value specified via opt=val
   val := ""
   for i < len(item) {
     c, s = utf8.DecodeRuneInString(item[i:])
     i += s
 
     if s == 0 {
-      return "", "", fmt.Errorf("failed to decode %s\n", item)
+      return "", "", false
     }
 
     val += string(c)
   }
 
-  return opt, val, nil
+  return opt, val, true
 }
 
+
+
+// find_option retrieves the parse_spec option entry corresponding 
+// to the given name f present. Otherwise returns false.
+func find_parse_spec(spec parseSpec, name string) (jsonOption, bool) {
+
+  for _, opt := range spec.Options {
+    if opt.Short_option == name || opt.Long_option == name {
+      return opt, true
+    }
+  }
+
+  return jsonOption{}, false
+}
 
 
 // match_spec_to_args matches a parse_info spec to the provided command
 // line options. Entries in parse_info which are lacking are ignored.
 // If the command line contains entries which are not in the spec the
 // function throws an error.
-func match_spec_to_args(parsed parse_spec, args []string) error {
+func match_spec_to_args(parsed parseSpec, args []string) error {
   fmt.Println("got it")
 
-  i := 1
-  for i < len(args) {
-
-    currentArg := args[i]
-    opt, val, err := decode_option(currentArg)
-    if err != nil {
-      log.Fatal(err)
+  var opt_name, opt_val string
+  var ok bool
+  for i := 1; i < len(args); i++ {
+    opt_name, opt_val, ok = decode_option(args[i])
+    if !ok {
+      continue
     }
 
-    fmt.Println("option ****", opt, val)
+    _, ok := find_parse_spec(parsed, opt_name)
+    if !ok {
+      continue
+    }
 
-    i++
+    fmt.Println("option ****", opt_name, opt_val)
   }
 
 
