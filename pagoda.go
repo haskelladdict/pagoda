@@ -9,11 +9,8 @@ import (
   "encoding/json"
   "os"
   "fmt"
-//  "reflect"
   "strconv"
   "unicode/utf8"
-//  "log"
-//  "io/ioutil"
 )
 
 
@@ -21,16 +18,8 @@ import (
 type parseSpec struct {
   Usage_info string
   Options []jsonOption    // options according to the spec
+  remainder []string      // unparsed remainder of command line
 }
-
-
-// const used for type tagging
-const (
-  aBool = iota
-  anInt
-  aFloat
-  aString
-)
 
 
 // json_option describes a single option specification as parsed from the
@@ -42,22 +31,31 @@ type jsonOption struct {
   Type string
   Default *string      // use a pointer to be able to distinguish the empty 
                        // string from non-present option
-  value interface{}
+  value interface{}    // option value of type Type
 }
 
 
-// Usage prints the usage information for the package
-func (p *parseSpec) Usage() {
-  fmt.Printf("Usage: %s %s\n", os.Args[0], p.Usage_info)
-  fmt.Println()
+// Value returns the value known for the given option. Either the
+// long or short option can be provided.
+// NOTE: The look up could be made more efficient via a map 
+func (p *parseSpec) Value(key string) (interface{}, error) {
+
   for _, opt := range p.Options {
-    fmt.Printf("\t-%s  --%s  %s", opt.Short_option, opt.Long_option,
-      opt.Description)
-    if opt.Default != nil {
-      fmt.Printf("  [default: %s]", *opt.Default)
+    if key == opt.Short_option || key == opt.Long_option {
+      if opt.value != nil {
+        return opt.value, nil
+      }
     }
-    fmt.Printf("\n")
   }
+
+  return nil, fmt.Errorf("command line option %s not found", key)
+}
+
+
+// Remainder returns a slice with all command line options that
+// were not parsed into options
+func (p *parseSpec) Remainder() []string {
+  return p.remainder
 }
 
 
@@ -85,8 +83,22 @@ func Init(content []byte) (*parseSpec, error) {
     return nil, err
   }
 
-  fmt.Println(parse_info)
   return &parse_info, nil
+}
+
+
+// Usage prints the usage information for the package
+func (p *parseSpec) Usage() {
+  fmt.Printf("Usage: %s %s\n", os.Args[0], p.Usage_info)
+  fmt.Println()
+  for _, opt := range p.Options {
+    fmt.Printf("\t-%s  --%s  %s", opt.Short_option, opt.Long_option,
+      opt.Description)
+    if opt.Default != nil {
+      fmt.Printf("  [default: %s]", *opt.Default)
+    }
+    fmt.Printf("\n")
+  }
 }
 
 
@@ -243,6 +255,7 @@ func find_parse_spec(spec *parseSpec, name string) (*jsonOption, bool) {
 // line options. Entries in parse_info which are lacking are ignored.
 // If the command line contains entries which are not in the spec the
 // function throws an error.
+// NOTE: We catch the option -h as the help option
 func match_spec_to_args(parsed *parseSpec, args []string) error {
 
   var opt_name, opt_val string
@@ -250,12 +263,13 @@ func match_spec_to_args(parsed *parseSpec, args []string) error {
   for i := 1; i < len(args); i++ {
     opt_name, opt_val, ok = decode_option(args[i])
     if !ok {
-      return fmt.Errorf("Encountered unknow commandline toke %s", args[i])
+      parsed.remainder = args[i:]
+      break
     }
 
     opt_spec, ok := find_parse_spec(parsed, opt_name)
     if !ok {
-      continue
+      return fmt.Errorf("Unknown command line option %s", args[i])
     }
 
     // if the option is not of type bool and we don't have
@@ -282,11 +296,6 @@ func match_spec_to_args(parsed *parseSpec, args []string) error {
       }
       opt_spec.value = val
     }
-
-    //fmt.Println("option ****", opt_name, opt_val, opt_spec.value)
   }
   return nil
 }
-
-
-

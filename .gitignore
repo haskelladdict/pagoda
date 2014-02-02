@@ -3,7 +3,8 @@
 *.a
 *.so
 
-example/
+tags
+parser_example
 
 # Folders
 _obj
