@@ -62,6 +62,7 @@ func main() {
   var bVal interface{}
   bVal, err = flags.Value("b")
   if err != nil {
+    fmt.Println(err)
     flags.Usage()
     return
   }

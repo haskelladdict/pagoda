@@ -14,11 +14,19 @@ import (
 )
 
 
-// parse_spec is the parent type describing all options and usage
+// parse_spec describes all options and usage actually present on the
+// command line and also keeps track of any remaining command line entries
 type parseSpec struct {
+  templateSpec
+  cmdlOptions []*jsonOption
+  remainder []string      // unparsed remainder of command line
+}
+
+
+// target_spec describes all possible options and usage per json spec file
+type templateSpec struct {
   Usage_info string
   Options []jsonOption    // options according to the spec
-  remainder []string      // unparsed remainder of command line
 }
 
 
@@ -40,7 +48,7 @@ type jsonOption struct {
 // NOTE: The look up could be made more efficient via a map 
 func (p *parseSpec) Value(key string) (interface{}, error) {
 
-  for _, opt := range p.Options {
+  for _, opt := range p.cmdlOptions {
     if key == opt.Short_option || key == opt.Long_option {
       if opt.value != nil {
         return opt.value, nil
@@ -62,7 +70,7 @@ func (p *parseSpec) Remainder() []string {
 // Init parses the specification of option in JSON format
 func Init(content []byte) (*parseSpec, error) {
 
-  var parse_info parseSpec
+  var parse_info templateSpec
   err := json.Unmarshal(content, &parse_info)
   if err != nil {
     return nil, err
@@ -78,12 +86,12 @@ func Init(content []byte) (*parseSpec, error) {
     return nil, err
   }
 
-  err = match_spec_to_args(&parse_info, os.Args)
+  matched_info, err := match_spec_to_args(&parse_info, os.Args)
   if err != nil {
     return nil, err
   }
 
-  return &parse_info, nil
+  return matched_info, nil
 }
 
 
@@ -104,7 +112,7 @@ func (p *parseSpec) Usage() {
 
 // validate_defaults checks that a usage string was given and 
 // that each spec has at least a short or a long option
-func validate_specs(parse_info *parseSpec) error {
+func validate_specs(parse_info *templateSpec) error {
   if parse_info.Usage_info == "" {
     return fmt.Errorf("Usage string missing")
   }
@@ -126,7 +134,7 @@ func validate_specs(parse_info *parseSpec) error {
 
 // extract_defaults looks at the default field (if present) and
 // attempts to determine the type of the option field
-func extract_defaults(parse_info *parseSpec) error {
+func extract_defaults(parse_info *templateSpec) error {
 
   opts := parse_info.Options
   for i := 0; i < len(opts); i++ {
@@ -235,10 +243,9 @@ func decode_option(item string) (string, string, bool) {
 }
 
 
-
 // find_option retrieves the parse_spec option entry corresponding 
 // to the given name f present. Otherwise returns false.
-func find_parse_spec(spec *parseSpec, name string) (*jsonOption, bool) {
+func find_parse_spec(spec *templateSpec, name string) (*jsonOption, bool) {
 
   opts := spec.Options
   for i := 0; i < len(opts); i++ {
@@ -256,7 +263,14 @@ func find_parse_spec(spec *parseSpec, name string) (*jsonOption, bool) {
 // If the command line contains entries which are not in the spec the
 // function throws an error.
 // NOTE: We catch the option -h as the help option
-func match_spec_to_args(parsed *parseSpec, args []string) error {
+func match_spec_to_args(template *templateSpec, args []string) (*parseSpec, 
+  error) {
+
+  // initialize final parsed specs
+  parsed := parseSpec{}
+  parsed.Options = template.Options
+  parsed.cmdlOptions = make([]*jsonOption, 0)
+  parsed.Usage_info = template.Usage_info
 
   var opt_name, opt_val string
   var ok bool
@@ -267,9 +281,9 @@ func match_spec_to_args(parsed *parseSpec, args []string) error {
       break
     }
 
-    opt_spec, ok := find_parse_spec(parsed, opt_name)
+    opt_spec, ok := find_parse_spec(template, opt_name)
     if !ok {
-      return fmt.Errorf("Unknown command line option %s", args[i])
+      return nil, fmt.Errorf("Unknown command line option %s", args[i])
     }
 
     // if the option is not of type bool and we don't have
@@ -285,17 +299,20 @@ func match_spec_to_args(parsed *parseSpec, args []string) error {
 
     // check that we got a value if the option doesn't have default 
     if opt_spec.Default == nil && opt_val == "" {
-      return fmt.Errorf("Missing value for option %s", opt_spec.Short_option)
+      return nil, fmt.Errorf("Missing value for option %s",
+        opt_spec.Short_option)
     }
 
     // check that the provided option has the correct typ
     if opt_val != "" {
       val, err := string_to_type(opt_val, opt_spec.Type)
       if err != nil {
-        return err
+        return nil, err
       }
       opt_spec.value = val
     }
+
+    parsed.cmdlOptions = append(parsed.cmdlOptions, opt_spec)
   }
-  return nil
+  return &parsed, nil
 }
