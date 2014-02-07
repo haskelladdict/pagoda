@@ -54,7 +54,7 @@ func main() {
 
   aVal, err := flags.Value("a")
   if err != nil {
-    flags.Usage()
+    //flags.Usage()
     return
   }
   fmt.Printf("option -a is set to %v\n", aVal)
@@ -63,7 +63,7 @@ func main() {
   bVal, err = flags.Value("b")
   if err != nil {
     fmt.Println(err)
-    flags.Usage()
+    //flags.Usage()
     return
   }
   fmt.Printf("received value %f for b\n", bVal.(float64))

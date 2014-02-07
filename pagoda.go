@@ -86,9 +86,20 @@ func Init(content []byte) (*parseSpec, error) {
     return nil, err
   }
 
+  // inject default help option
+  helpDefault := "true"
+  parse_info.Options = append(parse_info.Options,
+    jsonOption{"h", "help", "this message", "bool", &helpDefault, nil})
+
   matched_info, err := match_spec_to_args(&parse_info, os.Args)
   if err != nil {
     return nil, err
+  }
+
+  // show help if requested and the exit
+  if _, err := matched_info.Value("h"); err != nil {
+    matched_info.Usage()
+    os.Exit(0)
   }
 
   return matched_info, nil
@@ -100,9 +111,9 @@ func (p *parseSpec) Usage() {
   fmt.Printf("Usage: %s %s\n", os.Args[0], p.Usage_info)
   fmt.Println()
   for _, opt := range p.Options {
-    fmt.Printf("\t-%s  --%s  %s", opt.Short_option, opt.Long_option,
+    fmt.Printf("\t-%s  --%-10s  %s", opt.Short_option, opt.Long_option,
       opt.Description)
-    if opt.Default != nil {
+    if opt.Default != nil && opt.Type != "bool" {
       fmt.Printf("  [default: %s]", *opt.Default)
     }
     fmt.Printf("\n")
@@ -132,8 +143,7 @@ func validate_specs(parse_info *templateSpec) error {
 }
 
 
-// extract_defaults looks at the default field (if present) and
-// attempts to determine the type of the option field
+// extract_defaults extracts the default field in the proper type
 func extract_defaults(parse_info *templateSpec) error {
 
   opts := parse_info.Options
@@ -263,7 +273,7 @@ func find_parse_spec(spec *templateSpec, name string) (*jsonOption, bool) {
 // If the command line contains entries which are not in the spec the
 // function throws an error.
 // NOTE: We catch the option -h as the help option
-func match_spec_to_args(template *templateSpec, args []string) (*parseSpec, 
+func match_spec_to_args(template *templateSpec, args []string) (*parseSpec,
   error) {
 
   // initialize final parsed specs
