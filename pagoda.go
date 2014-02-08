@@ -50,9 +50,7 @@ func (p *parseSpec) Value(key string) (interface{}, error) {
 
   for _, opt := range p.cmdlOptions {
     if key == opt.Short_option || key == opt.Long_option {
-      if opt.value != nil {
-        return opt.value, nil
-      }
+      return opt.value, nil
     }
   }
 
@@ -86,18 +84,15 @@ func Init(content []byte) (*parseSpec, error) {
     return nil, err
   }
 
-  // inject default help option
-  helpDefault := "true"
-  parse_info.Options = append(parse_info.Options,
-    jsonOption{"h", "help", "this message", "bool", &helpDefault, nil})
+  inject_default_help_option(&parse_info)
 
   matched_info, err := match_spec_to_args(&parse_info, os.Args)
   if err != nil {
     return nil, err
   }
 
-  // show help if requested and the exit
-  if _, err := matched_info.Value("h"); err != nil {
+  // check if help was requested. In that case show Usage() and then exit
+  if _, err := matched_info.Value("h"); err == nil {
     matched_info.Usage()
     os.Exit(0)
   }
@@ -199,6 +194,17 @@ func string_to_type(value string, theType string) (interface{}, error) {
   default:
     return nil, fmt.Errorf("unknow type %s", theType)
   }
+}
+
+
+
+// inject_default_help_option adds a default help option to the list of
+// command line switches
+func inject_default_help_option(spec *templateSpec) {
+
+  helpDefault := "true"
+  spec.Options = append(spec.Options,
+    jsonOption{"h", "help", "this message", "bool", &helpDefault, nil})
 }
 
 
@@ -313,7 +319,7 @@ func match_spec_to_args(template *templateSpec, args []string) (*parseSpec,
         opt_spec.Short_option)
     }
 
-    // check that the provided option has the correct typ
+    // check that the provided option has the correct type
     if opt_val != "" {
       val, err := string_to_type(opt_val, opt_spec.Type)
       if err != nil {
