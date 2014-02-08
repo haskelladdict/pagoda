@@ -16,7 +16,7 @@ import (
 
 // parse_spec describes all options and usage actually present on the
 // command line and also keeps track of any remaining command line entries
-type parseSpec struct {
+type parsedSpec struct {
   templateSpec
   cmdlOptions []*jsonOption
   remainder []string      // unparsed remainder of command line
@@ -46,7 +46,7 @@ type jsonOption struct {
 // Value returns the value known for the given option. Either the
 // long or short option can be provided.
 // NOTE: The look up could be made more efficient via a map 
-func (p *parseSpec) Value(key string) (interface{}, error) {
+func (p *parsedSpec) Value(key string) (interface{}, error) {
 
   for _, opt := range p.cmdlOptions {
     if key == opt.Short_option || key == opt.Long_option {
@@ -60,13 +60,13 @@ func (p *parseSpec) Value(key string) (interface{}, error) {
 
 // Remainder returns a slice with all command line options that
 // were not parsed into options
-func (p *parseSpec) Remainder() []string {
+func (p *parsedSpec) Remainder() []string {
   return p.remainder
 }
 
 
 // Init parses the specification of option in JSON format
-func Init(content []byte) (*parseSpec, error) {
+func Init(content []byte) (*parsedSpec, error) {
 
   var parse_info templateSpec
   err := json.Unmarshal(content, &parse_info)
@@ -102,12 +102,20 @@ func Init(content []byte) (*parseSpec, error) {
 
 
 // Usage prints the usage information for the package
-func (p *parseSpec) Usage() {
+func (p *parsedSpec) Usage() {
   fmt.Printf("Usage: %s %s\n", os.Args[0], p.Usage_info)
   fmt.Println()
   for _, opt := range p.Options {
-    fmt.Printf("\t-%s  --%-10s  %s", opt.Short_option, opt.Long_option,
-      opt.Description)
+
+    if opt.Long_option == "" {
+      fmt.Printf("\t-%s             %s", opt.Short_option, opt.Description)
+    } else if opt.Short_option == "" {
+      fmt.Printf("\t    --%-10s  %s", opt.Long_option, opt.Description)
+    } else {
+      fmt.Printf("\t-%s  --%-10s  %s", opt.Short_option, opt.Long_option,
+        opt.Description)
+    }
+
     if opt.Default != nil && opt.Type != "bool" {
       fmt.Printf("  [default: %s]", *opt.Default)
     }
@@ -204,7 +212,8 @@ func inject_default_help_option(spec *templateSpec) {
 
   helpDefault := "true"
   spec.Options = append(spec.Options,
-    jsonOption{"h", "help", "this message", "bool", &helpDefault, nil})
+    jsonOption{"h", "help", "print this help text and exit", "bool", 
+      &helpDefault, nil})
 }
 
 
@@ -279,11 +288,11 @@ func find_parse_spec(spec *templateSpec, name string) (*jsonOption, bool) {
 // If the command line contains entries which are not in the spec the
 // function throws an error.
 // NOTE: We catch the option -h as the help option
-func match_spec_to_args(template *templateSpec, args []string) (*parseSpec,
+func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
   error) {
 
   // initialize final parsed specs
-  parsed := parseSpec{}
+  parsed := parsedSpec{}
   parsed.Options = template.Options
   parsed.cmdlOptions = make([]*jsonOption, 0)
   parsed.Usage_info = template.Usage_info

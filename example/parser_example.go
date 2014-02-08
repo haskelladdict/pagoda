@@ -30,7 +30,7 @@ var specs = []byte(`
     "Type"         : "float"
   },
   { 
-    "Long_option" : "name",
+    "Short_option" : "c",
     "Description" : "the name of the thing",
     "Type"        : "string"
   }
