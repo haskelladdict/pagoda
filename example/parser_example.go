@@ -13,7 +13,7 @@ import (
 )
 
 
-var specs = []byte(`
+var specs1 = []byte(`
 {
   "options" : [
   {
@@ -37,7 +37,39 @@ var specs = []byte(`
 
   ],
 
-  "Usage_info" : "[options] <filename>"
+  "Usage_info" : "parser_example is a program for testing pagoda"
+}
+`)
+
+
+var specs = []byte(`
+{
+  "options" : [
+  {
+    "Short_option" : "a",
+    "Long_option"  : "all",
+    "Description"  : "list them all",
+    "Type"         : "bool",
+    "Default"      : "true",
+    "Subcommand"    : "general"
+  },
+  { 
+    "Short_option" : "b",
+    "Long_option"  : "bar",
+    "Description"  : "this causes trouble",
+    "Type"         : "float",
+    "Subcommand"    : "general"
+  },
+  { 
+    "Short_option" : "c",
+    "Description"  : "the name of the thing",
+    "Type"         : "string",
+    "Subcommand"    : "special"
+  }
+
+  ],
+
+  "Usage_info" : "parser_example is a program for testing pagoda"
 }
 `)
 
@@ -54,6 +86,7 @@ func main() {
 
   aVal, err := flags.Value("a")
   if err != nil {
+    fmt.Println(err)
     //flags.Usage()
     return
   }

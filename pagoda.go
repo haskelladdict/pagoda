@@ -18,7 +18,12 @@ import (
 // command line and also keeps track of any remaining command line entries
 type parsedSpec struct {
   templateSpec
-  cmdlOptions []*jsonOption
+  cmdlOptions jsonOptions
+
+  subcommand_mode bool
+  subcommand string
+  subcommand_options map[string]jsonOptions
+
   remainder []string      // unparsed remainder of command line
 }
 
@@ -26,7 +31,7 @@ type parsedSpec struct {
 // target_spec describes all possible options and usage per json spec file
 type templateSpec struct {
   Usage_info string
-  Options []jsonOption    // options according to the spec
+  Options jsonOptions   // options according to the spec
 }
 
 
@@ -39,8 +44,11 @@ type jsonOption struct {
   Type string
   Default *string      // use a pointer to be able to distinguish the empty 
                        // string from non-present option
+  Subcommand *string
   value interface{}    // option value of type Type
 }
+
+type jsonOptions []jsonOption
 
 
 // Value returns the value known for the given option. Either the
@@ -74,7 +82,9 @@ func Init(content []byte) (*parsedSpec, error) {
     return nil, err
   }
 
-  err = validate_specs(&parse_info)
+  haveGroupMode := check_for_group_mode(&parse_info)
+
+  err = validate_specs(&parse_info, haveGroupMode)
   if err != nil {
     return nil, err
   }
@@ -84,16 +94,19 @@ func Init(content []byte) (*parsedSpec, error) {
     return nil, err
   }
 
-  inject_default_help_option(&parse_info)
-
-  matched_info, err := match_spec_to_args(&parse_info, os.Args)
+  matched_info, err := match_spec_to_args(&parse_info, os.Args, haveGroupMode)
   if err != nil {
     return nil, err
   }
 
   // check if help was requested. In that case show Usage() and then exit
   if _, err := matched_info.Value("h"); err == nil {
-    matched_info.Usage()
+    if matched_info.subcommand_mode {
+      command_usage(matched_info.Usage_info, matched_info.subcommand,
+        matched_info.Options, os.Args)
+    } else {
+      matched_info.Usage()
+    }
     os.Exit(0)
   }
 
@@ -103,9 +116,30 @@ func Init(content []byte) (*parsedSpec, error) {
 
 // Usage prints the usage information for the package
 func (p *parsedSpec) Usage() {
-  fmt.Printf("Usage: %s %s\n", os.Args[0], p.Usage_info)
+
+  fmt.Println(p.Usage_info)
   fmt.Println()
-  for _, opt := range p.Options {
+
+  if p.subcommand_mode {
+    fmt.Printf("Usage: %s SUBCOMMAND [arguments]\n", os.Args[0])
+    fmt.Println("\nAvailable SUBCOMMANDS are:\n")
+    for k, _ := range p.subcommand_options {
+      fmt.Printf("\t%-10s\n", k)
+    }
+  } else {
+    command_usage(p.Usage_info, "", p.Options, os.Args)
+  }
+
+  fmt.Println()
+}
+
+
+// command_usage prints the usage for a specific subcommand
+func command_usage(info string, subcommand string, options jsonOptions,
+  args []string) {
+
+  fmt.Printf("Usage: %s %s [arguments]\n\n", args[0], subcommand)
+  for _, opt := range options {
 
     if opt.Long_option == "" {
       fmt.Printf("\t-%-15s  %s", opt.Short_option, opt.Description)
@@ -124,9 +158,25 @@ func (p *parsedSpec) Usage() {
 }
 
 
+// check_for_group_mode tests if at least one option has a 
+// group mode set
+func check_for_group_mode(parse_info *templateSpec) bool {
+
+  haveGroupMode := false
+  for _, item := range parse_info.Options {
+    if item.Subcommand != nil {
+      haveGroupMode = true
+      break
+    }
+  }
+
+  return haveGroupMode
+}
+
+
 // validate_defaults checks that a usage string was given and 
-// that each spec has at least a short or a long option
-func validate_specs(parse_info *templateSpec) error {
+// that each spec has at least a short or a long option. 
+func validate_specs(parse_info *templateSpec, haveGroupMode bool) error {
   if parse_info.Usage_info == "" {
     return fmt.Errorf("Pagoda: Usage string missing")
   }
@@ -139,6 +189,11 @@ func validate_specs(parse_info *templateSpec) error {
     if opt.Type == "" {
       return fmt.Errorf("Pagoda: Need a type descriptor for option %s.",
         opt.Short_option)
+    }
+
+    if haveGroupMode && opt.Subcommand == nil {
+      return fmt.Errorf("Pagoda: Only some options have command group " +
+        "mode selected.")
     }
   }
 
@@ -208,12 +263,12 @@ func string_to_type(value string, theType string) (interface{}, error) {
 
 // inject_default_help_option adds a default help option to the list of
 // command line switches
-func inject_default_help_option(spec *templateSpec) {
+func inject_default_help_option(opts *jsonOptions) {
 
   helpDefault := "true"
-  spec.Options = append(spec.Options,
+  *opts = append(*opts,
     jsonOption{"h", "help", "print this help text and exit", "bool",
-      &helpDefault, nil})
+      &helpDefault, nil, nil})
 }
 
 
@@ -270,9 +325,8 @@ func decode_option(item string) (string, string, bool) {
 
 // find_option retrieves the parse_spec option entry corresponding 
 // to the given name f present. Otherwise returns false.
-func find_parse_spec(spec *templateSpec, name string) (*jsonOption, bool) {
+func find_parse_spec(opts jsonOptions, name string) (*jsonOption, bool) {
 
-  opts := spec.Options
   for i := 0; i < len(opts); i++ {
     if opts[i].Short_option == name || opts[i].Long_option == name {
       return &opts[i], true
@@ -283,32 +337,97 @@ func find_parse_spec(spec *templateSpec, name string) (*jsonOption, bool) {
 }
 
 
-// match_spec_to_args matches a parse_info spec to the provided command
-// line options. Entries in parse_info which are lacking are ignored.
-// If the command line contains entries which are not in the spec the
-// function throws an error.
-// NOTE: We catch the option -h as the help option
-func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
-  error) {
+// group_options distributes all options across a map with group
+// name as key
+func group_options(parse_data *parsedSpec, template *templateSpec) map[string]jsonOptions {
+
+  subcommand_options := make(map[string]jsonOptions)
+  for _, opts := range template.Options {
+    key := *opts.Subcommand
+    if _, ok := subcommand_options[key]; !ok {
+      option_list := make(jsonOptions, 0)
+      option_list = append(option_list, opts)
+      subcommand_options[key] = option_list
+    } else {
+      subcommand_options[key] = append(subcommand_options[key], opts)
+    }
+  }
+  return subcommand_options
+}
+
+
+// inialize_parsed_spec initialize the parsed spec
+func initialize_parsed_spec(haveSubcommands bool, template *templateSpec) *parsedSpec {
 
   // initialize final parsed specs
   parsed := parsedSpec{}
   parsed.Options = template.Options
-  parsed.cmdlOptions = make([]*jsonOption, 0)
+  parsed.cmdlOptions = make([]jsonOption, 0)
   parsed.Usage_info = template.Usage_info
+
+  if haveSubcommands {
+    parsed.subcommand_options = group_options(&parsed, template)
+    parsed.subcommand_mode= haveSubcommands
+  }
+
+  return &parsed
+}
+
+
+func extract_subcommand(parsed *parsedSpec, args []string) ([]string, error) {
+
+  subcommand := args[1]
+  opts, ok := parsed.subcommand_options[subcommand];
+  if !ok {
+    return nil, fmt.Errorf("Pagoda: Unknown command group %s", subcommand)
+  }
+
+  parsed.Options = opts
+  parsed.subcommand = subcommand
+  return args[2:], nil
+}
+
+
+// match_spec_to_args matches a parse_info spec to the provided command
+// line options. Entries in parse_info which are lacking are ignored.
+// If the command line contains entries which are not in the spec the
+// function throws an error.
+func match_spec_to_args(template *templateSpec, args []string,
+  haveSubcommands bool) (*parsedSpec, error) {
+
+  parsed := initialize_parsed_spec(haveSubcommands, template)
+
+  if len(args) <= 1 {
+    return parsed, nil
+  }
+
+  if haveSubcommands {
+    var err error
+    args, err = extract_subcommand(parsed, args)
+    if err != nil {
+      parsed.Usage()
+      return nil, err
+    }
+  } else {
+    args = args[1:]
+  }
+
+  inject_default_help_option(&parsed.Options)
 
   var opt_name, opt_val string
   var ok bool
-  for i := 1; i < len(args); i++ {
+  for i := 0; i < len(args); i++ {
     opt_name, opt_val, ok = decode_option(args[i])
     if !ok {
       parsed.remainder = args[i:]
       break
     }
 
-    opt_spec, ok := find_parse_spec(template, opt_name)
+    opt_spec, ok := find_parse_spec(parsed.Options, opt_name)
     if !ok {
-      return nil, fmt.Errorf("Pagoda: Unknown command line option %s", args[i])
+      parsed.Usage()
+      return nil, fmt.Errorf("Pagoda: Unknown command line option %s",
+        args[i])
     }
 
     // if the option is not of type bool and we don't have
@@ -324,6 +443,7 @@ func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
 
     // check that we got a value if the option doesn't have default 
     if opt_spec.Default == nil && opt_val == "" {
+      parsed.Usage()
       return nil, fmt.Errorf("Pagoda: Missing value for option %s",
         opt_spec.Short_option)
     }
@@ -337,7 +457,7 @@ func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
       opt_spec.value = val
     }
 
-    parsed.cmdlOptions = append(parsed.cmdlOptions, opt_spec)
+    parsed.cmdlOptions = append(parsed.cmdlOptions, *opt_spec)
   }
-  return &parsed, nil
+  return parsed, nil
 }
