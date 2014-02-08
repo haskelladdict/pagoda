@@ -54,7 +54,7 @@ func (p *parsedSpec) Value(key string) (interface{}, error) {
     }
   }
 
-  return nil, fmt.Errorf("command line option %s not found", key)
+  return nil, fmt.Errorf("Pagoda: command line option %s not found", key)
 }
 
 
@@ -108,7 +108,7 @@ func (p *parsedSpec) Usage() {
   for _, opt := range p.Options {
 
     if opt.Long_option == "" {
-      fmt.Printf("\t-%s             %s", opt.Short_option, opt.Description)
+      fmt.Printf("\t-%-15s  %s", opt.Short_option, opt.Description)
     } else if opt.Short_option == "" {
       fmt.Printf("\t    --%-10s  %s", opt.Long_option, opt.Description)
     } else {
@@ -128,16 +128,16 @@ func (p *parsedSpec) Usage() {
 // that each spec has at least a short or a long option
 func validate_specs(parse_info *templateSpec) error {
   if parse_info.Usage_info == "" {
-    return fmt.Errorf("Usage string missing")
+    return fmt.Errorf("Pagoda: Usage string missing")
   }
 
   for _, opt := range parse_info.Options {
     if opt.Short_option == "" && opt.Long_option == "" {
-      return fmt.Errorf("Need at least a short or long description.")
+      return fmt.Errorf("Pagoda: Need at least a short or long description.")
     }
 
     if opt.Type == "" {
-      return fmt.Errorf("Need a type descriptor for option %s.",
+      return fmt.Errorf("Pagoda: Need a type descriptor for option %s.",
         opt.Short_option)
     }
   }
@@ -184,7 +184,7 @@ func string_to_type(value string, theType string) (interface{}, error) {
     if i, err := strconv.Atoi(value); err == nil {
       return i, nil
     } else {
-      return nil, fmt.Errorf("cannot convert %s to requested type %s",
+      return nil, fmt.Errorf("Pagoda: cannot convert %s to requested type %s",
         value, theType)
     }
 
@@ -192,7 +192,7 @@ func string_to_type(value string, theType string) (interface{}, error) {
     if v, err := strconv.ParseFloat(value, 64); err == nil {
       return v, nil
     } else {
-      return nil, fmt.Errorf("cannot convert %s to requested type %s", 
+      return nil, fmt.Errorf("Pagoda: cannot convert %s to requested type %s",
         value, theType)
     }
 
@@ -200,7 +200,7 @@ func string_to_type(value string, theType string) (interface{}, error) {
     return value, nil
 
   default:
-    return nil, fmt.Errorf("unknow type %s", theType)
+    return nil, fmt.Errorf("Pagoda: unknow type %s", theType)
   }
 }
 
@@ -212,7 +212,7 @@ func inject_default_help_option(spec *templateSpec) {
 
   helpDefault := "true"
   spec.Options = append(spec.Options,
-    jsonOption{"h", "help", "print this help text and exit", "bool", 
+    jsonOption{"h", "help", "print this help text and exit", "bool",
       &helpDefault, nil})
 }
 
@@ -308,7 +308,7 @@ func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
 
     opt_spec, ok := find_parse_spec(template, opt_name)
     if !ok {
-      return nil, fmt.Errorf("Unknown command line option %s", args[i])
+      return nil, fmt.Errorf("Pagoda: Unknown command line option %s", args[i])
     }
 
     // if the option is not of type bool and we don't have
@@ -324,7 +324,7 @@ func match_spec_to_args(template *templateSpec, args []string) (*parsedSpec,
 
     // check that we got a value if the option doesn't have default 
     if opt_spec.Default == nil && opt_val == "" {
-      return nil, fmt.Errorf("Missing value for option %s",
+      return nil, fmt.Errorf("Pagoda: Missing value for option %s",
         opt_spec.Short_option)
     }
 
