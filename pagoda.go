@@ -413,12 +413,24 @@ func initialize_parsed_spec(haveSubcommands bool, template *templateSpec,
     // parse subcommand info if present
     if template.Subcommand_info != nil {
       parsed.subcommand_info_map = make(map[string]string)
-      info := template.Subcommand_info.([]interface{})
-      for _, infoMap := range info {
-        for k, v := range infoMap.(map[string]interface{}) {
-          value := v.(string)
-          parsed.subcommand_info_map[k] = value
+      conversion_error := true
+      if info, ok := template.Subcommand_info.([]interface{}); ok {
+        for _, infoMap := range info {
+          if infoMap, ok := infoMap.(map[string]interface{}); ok {
+            for k, v := range infoMap {
+              if value, ok := v.(string); ok {
+                parsed.subcommand_info_map[k] = value
+                conversion_error = false
+              }
+            }
+          }
         }
+      }
+
+      if conversion_error {
+        err := fmt.Errorf("%sPagoda: Error converting subcommand info",
+          parsed.Usage())
+        return nil, nil, err
       }
     }
   }
