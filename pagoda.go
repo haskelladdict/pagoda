@@ -22,6 +22,7 @@ type parsedSpec struct {
 
   subcommand_mode bool
   subcommand string
+  subcommand_info_map map[string]string
   subcommand_options map[string]jsonOptions
 
   remainder []string      // unparsed remainder of command line
@@ -33,6 +34,7 @@ type parsedSpec struct {
 type templateSpec struct {
   Usage_info string
   Options jsonOptions
+  Subcommand_info interface{}
 }
 
 
@@ -64,6 +66,20 @@ func (p *parsedSpec) Value(key string) (interface{}, error) {
   }
 
   return nil, fmt.Errorf("Pagoda: command line option %s not found", key)
+}
+
+
+// Subcommand returns a string with the user selected subcommand.
+// If no subcommand usage was defined by the user this function returns
+// an error
+func (p *parsedSpec) Subcommand() (string, error) {
+
+  if p.subcommand_mode {
+    return p.subcommand, nil
+  } else {
+    return "", fmt.Errorf("%sPagoda: No subcommand commandline spec provided",
+      p.Usage())
+  }
 }
 
 
@@ -110,12 +126,14 @@ func Init(content []byte) (*parsedSpec, error) {
 
   // check if help was requested. In that case show Usage() and then exit
   if _, err := matched_info.Value("h"); err == nil {
+    var usage string
     if matched_info.subcommand_mode {
-      command_usage(matched_info.Usage_info, matched_info.subcommand,
+      usage = command_usage(matched_info.Usage_info, matched_info.subcommand,
         matched_info.Options, os.Args)
     } else {
-      matched_info.Usage()
+      usage = matched_info.Usage()
     }
+    fmt.Println(usage)
     os.Exit(0)
   }
 
@@ -123,47 +141,60 @@ func Init(content []byte) (*parsedSpec, error) {
 }
 
 
-// Usage prints the usage information for the package
-func (p *parsedSpec) Usage() {
+// Usage returns the usage string
+func (p *parsedSpec) Usage() string {
 
-  fmt.Println(p.Usage_info)
-  fmt.Println()
+  var usageString string
+  usageString += p.Usage_info
+  usageString += "\n\n"
 
   if p.subcommand_mode {
-    fmt.Printf("Usage: %s SUBCOMMAND [arguments]\n", os.Args[0])
-    fmt.Println("\nAvailable SUBCOMMANDS are:\n")
+    usageString += fmt.Sprintf("Usage: %s SUBCOMMAND [arguments]\n", os.Args[0])
+    usageString += fmt.Sprintf("\nAvailable SUBCOMMANDS are:\n")
     for k, _ := range p.subcommand_options {
-      fmt.Printf("\t%-10s\n", k)
+
+      command_desc := ""
+      if v, ok := p.subcommand_info_map[k]; ok {
+        command_desc = v
+      }
+      usageString += fmt.Sprintf("\t%-10s  %s\n", k, command_desc)
     }
   } else {
-    command_usage(p.Usage_info, "", p.Options, os.Args)
+    usageString += command_usage(p.Usage_info, "", p.Options, os.Args)
   }
 
-  fmt.Println()
+  usageString += "\n"
+  return usageString
 }
 
 
 // command_usage prints the usage for a specific subcommand
 func command_usage(info string, subcommand string, options jsonOptions,
-  args []string) {
+  args []string) string {
 
-  fmt.Printf("Usage: %s %s [arguments]\n\n", args[0], subcommand)
+  var usageString string
+  usageString += fmt.Sprintf("Usage: %s %s [arguments]\n\n", args[0],
+    subcommand)
   for _, opt := range options {
 
     if opt.Long_option == "" {
-      fmt.Printf("\t-%-15s  %s", opt.Short_option, opt.Description)
-    } else if opt.Short_option == "" {
-      fmt.Printf("\t    --%-10s  %s", opt.Long_option, opt.Description)
-    } else {
-      fmt.Printf("\t-%s  --%-10s  %s", opt.Short_option, opt.Long_option,
+      usageString += fmt.Sprintf("\t-%-15s  %s", opt.Short_option,
         opt.Description)
+    } else if opt.Short_option == "" {
+      usageString += fmt.Sprintf("\t    --%-10s  %s", opt.Long_option,
+        opt.Description)
+    } else {
+      usageString += fmt.Sprintf("\t-%s  --%-10s  %s", opt.Short_option,
+        opt.Long_option, opt.Description)
     }
 
     if opt.Default != nil && opt.Type != "bool" {
-      fmt.Printf("  [default: %s]", *opt.Default)
+      usageString += fmt.Sprintf("  [default: %s]", *opt.Default)
     }
-    fmt.Printf("\n")
+    usageString += "\n"
   }
+
+  return usageString
 }
 
 
@@ -378,15 +409,27 @@ func initialize_parsed_spec(haveSubcommands bool, template *templateSpec,
   if haveSubcommands {
     parsed.subcommand_options = group_options(&parsed, template)
     parsed.subcommand_mode= haveSubcommands
+
+    // parse subcommand info if present
+    if template.Subcommand_info != nil {
+      parsed.subcommand_info_map = make(map[string]string)
+      info := template.Subcommand_info.([]interface{})
+      for _, infoMap := range info {
+        for k, v := range infoMap.(map[string]interface{}) {
+          value := v.(string)
+          parsed.subcommand_info_map[k] = value
+        }
+      }
+    }
   }
 
   if haveSubcommands && len(args) > 1 {
     subcommand := args[1]
     opts, ok := parsed.subcommand_options[subcommand];
     if !ok {
-      parsed.Usage()
       return nil, nil,
-        fmt.Errorf("Pagoda: Unknown command group %s", subcommand)
+        fmt.Errorf("%sPagoda: Unknown command group %s", parsed.Usage(),
+          subcommand)
     }
 
     parsed.Options = opts
@@ -416,9 +459,8 @@ func match_spec_to_args(parsed *parsedSpec, args []string) (*parsedSpec, error) 
 
     opt_spec, ok := find_parse_spec(parsed.Options, opt_name)
     if !ok {
-      parsed.Usage()
-      return nil, fmt.Errorf("Pagoda: Unknown command line option %s",
-        args[i])
+      return nil, fmt.Errorf("%sPagoda: Unknown command line option %s",
+        parsed.Usage(), args[i])
     }
 
     // if the option is not of type bool and we don't have
@@ -434,9 +476,8 @@ func match_spec_to_args(parsed *parsedSpec, args []string) (*parsedSpec, error) 
 
     // check that we got a value if the option doesn't have default 
     if opt_spec.Default == nil && opt_val == "" {
-      parsed.Usage()
-      return nil, fmt.Errorf("Pagoda: Missing value for option %s",
-        opt_spec.Short_option)
+      return nil, fmt.Errorf("%sPagoda: Missing value for option %s",
+        parsed.Usage(), opt_spec.Short_option)
     }
 
     // check that the provided option has the correct type

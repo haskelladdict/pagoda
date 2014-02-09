@@ -8,7 +8,8 @@ package main
 
 import (
   "fmt"
-  "log"
+//  "log"
+  "os"
   "github.com/haskelladdict/pagoda"
 )
 
@@ -46,30 +47,35 @@ var specs = []byte(`
 {
   "options" : [
   {
-    "Short_option" : "a",
-    "Long_option"  : "all",
-    "Description"  : "list them all",
-    "Type"         : "bool",
-    "Default"      : "true",
-    "Subcommand"    : "general"
+    "short_option" : "a",
+    "long_option"  : "all",
+    "description"  : "list them all",
+    "type"         : "bool",
+    "default"      : "true",
+    "subcommand"   : "general"
   },
   { 
-    "Short_option" : "b",
-    "Long_option"  : "bar",
-    "Description"  : "this causes trouble",
-    "Type"         : "float",
-    "Subcommand"    : "general"
+    "short_option" : "b",
+    "long_option"  : "bloat",
+    "description"  : "this causes trouble",
+    "type"         : "int",
+    "subcommand"    : "general"
   },
   { 
-    "Short_option" : "c",
-    "Description"  : "the name of the thing",
-    "Type"         : "string",
-    "Subcommand"    : "special"
+    "short_option" : "c",
+    "description"  : "the name of the thing",
+    "type"         : "string",
+    "subcommand"    : "special"
   }
 
   ],
 
-  "Usage_info" : "parser_example is a program for testing pagoda"
+  "usage_info" : "parser_example is a program for testing pagoda",
+
+  "subcommand_info" : [
+    { "general" : "this is some general description" },
+    { "special" : "this is really special" }
+  ]
 }
 `)
 
@@ -81,25 +87,38 @@ func main() {
   var err error
   flags, err := pagoda.Init(specs)
   if err != nil {
-    log.Fatal(err)
+    fmt.Println(err)
+    os.Exit(1)
   }
 
-  aVal, err := flags.Value("a")
-  if err != nil {
-    fmt.Println(err)
-    //flags.Usage()
-    return
+  if len(os.Args) <= 1 {
+    fmt.Println(flags.Usage())
+    os.Exit(1)
   }
-  fmt.Printf("option -a is set to %v\n", aVal)
 
-  var bVal interface{}
-  bVal, err = flags.Value("b")
-  if err != nil {
-    fmt.Println(err)
-    //flags.Usage()
-    return
+
+  if f, _:= flags.Subcommand(); f == "general" {
+    aVal, err := flags.Value("a")
+    if err != nil {
+      fmt.Println("a was not provided")
+      //fmt.Println(err)
+      //os.Exit(1)
+    }
+    fmt.Printf("option -a is set to %v\n", aVal)
+
+    //var bVal interface{}
+    _ , err = flags.Value("b")
+    if err != nil {
+      //fmt.Println(err)
+      fmt.Println("b was not provided")
+      os.Exit(1)
+    }
+  } else if f, _ := flags.Subcommand(); f == "special" {
+    _ , err := flags.Value("c")
+    if err != nil {
+      fmt.Println("no c option was provided")
+    }
   }
-  fmt.Printf("received value %f for b\n", bVal.(float64))
 
   fmt.Printf("the remaining command line options are %v\n", flags.Remainder())
 }
