@@ -18,7 +18,7 @@ import (
 // command line and also keeps track of any remaining command line entries
 type parsedSpec struct {
   templateSpec
-  cmdlOptions jsonOptions
+  cmdlOptions jsonOptions  // list of commandline options provided at runtime
 
   subcommand_mode bool
   subcommand string
@@ -28,10 +28,11 @@ type parsedSpec struct {
 }
 
 
-// target_spec describes all possible options and usage per json spec file
+// target_spec is used for the initial parsing of the user provided
+// JSON spec of commandline options 
 type templateSpec struct {
   Usage_info string
-  Options jsonOptions   // options according to the spec
+  Options jsonOptions
 }
 
 
@@ -44,7 +45,7 @@ type jsonOption struct {
   Type string
   Default *string      // use a pointer to be able to distinguish the empty 
                        // string from non-present option
-  Subcommand *string
+  Subcommand *string   // subcommand this option belongs to
   value interface{}    // option value of type Type
 }
 
@@ -82,9 +83,9 @@ func Init(content []byte) (*parsedSpec, error) {
     return nil, err
   }
 
-  haveGroupMode := check_for_group_mode(&parse_info)
+  haveSubcommands := check_for_subcommand_mode(&parse_info)
 
-  err = validate_specs(&parse_info, haveGroupMode)
+  err = validate_specs(&parse_info, haveSubcommands)
   if err != nil {
     return nil, err
   }
@@ -94,7 +95,15 @@ func Init(content []byte) (*parsedSpec, error) {
     return nil, err
   }
 
-  matched_info, err := match_spec_to_args(&parse_info, os.Args, haveGroupMode)
+  parsed, args, err := initialize_parsed_spec(haveSubcommands, &parse_info,
+    os.Args)
+  if err != nil {
+    return nil, err
+  }
+
+  inject_default_help_option(&parsed.Options)
+
+  matched_info, err := match_spec_to_args(parsed, args)
   if err != nil {
     return nil, err
   }
@@ -160,7 +169,7 @@ func command_usage(info string, subcommand string, options jsonOptions,
 
 // check_for_group_mode tests if at least one option has a 
 // group mode set
-func check_for_group_mode(parse_info *templateSpec) bool {
+func check_for_subcommand_mode(parse_info *templateSpec) bool {
 
   haveGroupMode := false
   for _, item := range parse_info.Options {
@@ -357,7 +366,8 @@ func group_options(parse_data *parsedSpec, template *templateSpec) map[string]js
 
 
 // inialize_parsed_spec initialize the parsed spec
-func initialize_parsed_spec(haveSubcommands bool, template *templateSpec) *parsedSpec {
+func initialize_parsed_spec(haveSubcommands bool, template *templateSpec,
+  args []string) (*parsedSpec, []string, error) {
 
   // initialize final parsed specs
   parsed := parsedSpec{}
@@ -370,21 +380,23 @@ func initialize_parsed_spec(haveSubcommands bool, template *templateSpec) *parse
     parsed.subcommand_mode= haveSubcommands
   }
 
-  return &parsed
-}
+  if haveSubcommands && len(args) > 1 {
+    subcommand := args[1]
+    opts, ok := parsed.subcommand_options[subcommand];
+    if !ok {
+      parsed.Usage()
+      return nil, nil,
+        fmt.Errorf("Pagoda: Unknown command group %s", subcommand)
+    }
 
-
-func extract_subcommand(parsed *parsedSpec, args []string) ([]string, error) {
-
-  subcommand := args[1]
-  opts, ok := parsed.subcommand_options[subcommand];
-  if !ok {
-    return nil, fmt.Errorf("Pagoda: Unknown command group %s", subcommand)
+    parsed.Options = opts
+    parsed.subcommand = subcommand
+    args = args[2:]
+  } else {
+    args = args[1:]
   }
 
-  parsed.Options = opts
-  parsed.subcommand = subcommand
-  return args[2:], nil
+  return &parsed, args, nil
 }
 
 
@@ -392,28 +404,7 @@ func extract_subcommand(parsed *parsedSpec, args []string) ([]string, error) {
 // line options. Entries in parse_info which are lacking are ignored.
 // If the command line contains entries which are not in the spec the
 // function throws an error.
-func match_spec_to_args(template *templateSpec, args []string,
-  haveSubcommands bool) (*parsedSpec, error) {
-
-  parsed := initialize_parsed_spec(haveSubcommands, template)
-
-  if len(args) <= 1 {
-    return parsed, nil
-  }
-
-  if haveSubcommands {
-    var err error
-    args, err = extract_subcommand(parsed, args)
-    if err != nil {
-      parsed.Usage()
-      return nil, err
-    }
-  } else {
-    args = args[1:]
-  }
-
-  inject_default_help_option(&parsed.Options)
-
+func match_spec_to_args(parsed *parsedSpec, args []string) (*parsedSpec, error) {
   var opt_name, opt_val string
   var ok bool
   for i := 0; i < len(args); i++ {
